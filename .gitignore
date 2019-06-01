@@ -121,3 +121,6 @@ dmypy.json
 # specific files
 settings.json
 billing.log
+
+# pycharm
+.idea
