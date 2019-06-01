@@ -10,13 +10,11 @@ If you try this script on new data, make sure your corpus
 has at least ~100k characters. ~1M is better.
 '''
 
-from __future__ import print_function
 from keras.callbacks import LambdaCallback
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import LSTM
 from keras.optimizers import RMSprop
-from keras.utils.data_utils import get_file
 import numpy as np
 import random
 import sys
