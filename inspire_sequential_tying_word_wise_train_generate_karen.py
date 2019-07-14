@@ -22,9 +22,17 @@ def create_model(vocab_size, embedding_dim=128, hidden=128):
     model = tf.keras.models.Sequential()
     model.add(
         tf.keras.layers.Embedding(
-            input_dim=vocab_size, output_dim=embedding_dim, mask_zero=True))
+            input_dim=vocab_size,
+            output_dim=embedding_dim,
+            mask_zero=True,
+            name='embedding',
+            input_length=SEQ_MAX_LEN))
     model.add(tf.keras.layers.LSTM(hidden, return_sequences=True))
-    model.add(tf.keras.layers.Lambda(lambda x: tf.keras.backend.dot(x, tf.keras.backend.transpose(model.get_layer('embedding').embeddings))))
+    model.add(
+        tf.keras.layers.Lambda(lambda x: tf.keras.backend.dot(
+            x,
+            tf.keras.backend.transpose(
+                model.get_layer('embedding').embeddings))))
     model.add(tf.keras.layers.Activation('softmax'))
 
     return model
@@ -46,7 +54,7 @@ def on_epoch_end(epoch, _):
     print('----- Generating text after Epoch: %d' % epoch)
 
     # ”みなさん”から始めたい
-    start_index = 1257
+    start_index = 5
     for diversity in diversities:
         print('----- diversity:', diversity)
 
@@ -86,41 +94,73 @@ def on_epoch_end(epoch, _):
         print()
 
 
+def batch_iter(corpus, batch_size, seq_len):
+    n_samples = len(corpus) - seq_len
+    num_batches_per_epoch = int((n_samples - 1) / batch_size) + 1
+
+    def data_generator():
+        while True:
+            n_samples = len(corpus) - seq_len
+            for batch_num in range(num_batches_per_epoch):
+                start_index = batch_num * batch_size
+                sentences = []
+                next_words = []
+                for i in range(
+                        min(batch_size, n_samples - batch_num * batch_size)):
+                    sentences.append(
+                        corpus[i + start_index:i + start_index + seq_len])
+                    next_words.append(
+                        tf.keras.utils.to_categorical(
+                            corpus[i + start_index + 1:i + start_index + 1 +
+                                   seq_len],
+                            len(word_to_id),
+                            dtype='bool'))
+
+                x = np.array(sentences)
+                y = np.array(next_words)
+                yield x, y
+
+    return num_batches_per_epoch, data_generator()
+
+
 # load corpus
 with open(FILE_PATH, 'rb') as f:
     corpus = pickle.load(f)
     word_to_id = pickle.load(f)
     id_to_word = pickle.load(f)
 
+corpus = corpus[:1000]
+
 # cut the text in semi-redundant sequences of maxlen characters
-sentences = []
-next_words = []
-for i in range(0, len(corpus) - SEQ_MAX_LEN, STEP):
-    sentences.append(corpus[i:i + SEQ_MAX_LEN])
-    next_words.append(tf.keras.utils.to_categorical(corpus[i+1:i+1+SEQ_MAX_LEN], len(word_to_id), dtype='bool'))
-
-print('nb sequences:', len(sentences))
-
-print('Vectorization...')
-vocab_size = len(word_to_id)
-x = np.array(sentences)
-y = np.array(next_words)
+# sentences = []
+# next_words = []
+# for i in range(0, len(corpus) - SEQ_MAX_LEN, STEP):
+#     sentences.append(corpus[i:i + SEQ_MAX_LEN])
+#     next_words.append(tf.keras.utils.to_categorical(corpus[i+1:i+1+SEQ_MAX_LEN], len(word_to_id), dtype='bool'))
+#
+# print('nb sequences:', len(sentences))
+#
+# print('Vectorization...')
+# vocab_size = len(word_to_id)
+# x = np.array(sentences)
+# y = np.array(next_words)
 
 print('Build model...')
+vocab_size = len(word_to_id)
 model = create_model(vocab_size)
 
 model.compile(
-    loss='categorical_crossentropy',
-    optimizer='adam',
-    metrics=['accuracy'])
+    loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 print_callback = tf.keras.callbacks.LambdaCallback(on_epoch_end=on_epoch_end)
-checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(MODEL_CHECKPOINT_PATH, save_weights_only=True)
+checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+    MODEL_CHECKPOINT_PATH, save_weights_only=True)
 
-model.fit(
-    x,
-    y,
-    batch_size=BATCH_SIZE,
+train_steps, train_batches = batch_iter(corpus, BATCH_SIZE, SEQ_MAX_LEN)
+print(train_steps)
+model.fit_generator(
+    train_batches,
+    train_steps,
     epochs=MAX_EPOCHS,
     callbacks=[print_callback, checkpoint_callback])
 
